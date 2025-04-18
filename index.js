@@ -71,7 +71,8 @@ io.on('connection', (socket) => {
     position: spawnPoint,
     rotation: randomRotation,
     health: 100,
-    armor: 0 // Initialize armor explicitly to 0
+    armor: 0, // Initialize armor explicitly to 0
+    frags: 0  // Initialize frag count
   };
   
   console.log('Player added to server with position:', spawnPoint);
@@ -157,10 +158,19 @@ io.on('connection', (socket) => {
       
       // Check if player died
       if (players[targetId].health <= 0) {
-        console.log(`Player ${targetId} died, respawning`);
+        // Increment killer's frag count
+        console.log(`Player ${socket.id} fragged player ${targetId}`);
+        players[socket.id].frags += 1;
+        
+        // Broadcast updated frag count to all players
+        io.emit('fragUpdate', {
+          id: socket.id,
+          frags: players[socket.id].frags
+        });
+        
         // Reset health and respawn
         players[targetId].health = 100;
-        players[targetId].armor = 0;
+        players[targetId].armor = 0; // Reset armor on death
         
         // Get new random spawn position
         const newSpawnPoint = getRandomSpawnPoint();
