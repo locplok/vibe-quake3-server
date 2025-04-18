@@ -38,6 +38,12 @@ const SPAWN_POINTS = [
   { x: 0, y: 1, z: -8 }
 ];
 
+// Helper function to get a random spawn point
+function getRandomSpawnPoint() {
+  const randomIndex = Math.floor(Math.random() * SPAWN_POINTS.length);
+  return SPAWN_POINTS[randomIndex];
+}
+
 // ... [copy the rest of your server code here] ...
 
 // Determine port
