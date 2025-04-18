@@ -114,4 +114,67 @@ io.on('connection', (socket) => {
       console.log('WARNING: Player not found in players object');
     }
   });
+
+  // Handle player hits
+  socket.on('playerHit', (hitData) => {
+    const targetId = hitData.id;
+    const damage = Math.round(hitData.damage); // Round damage to integer
+    
+    console.log(`\n=== RECEIVED PLAYER HIT EVENT ===`);
+    console.log(`Shooter: ${socket.id}`);
+    console.log(`Target: ${targetId}`);
+    console.log(`Damage: ${damage}`);
+    console.log(`Target exists: ${!!players[targetId]}`);
+    console.log(`All Players: ${Object.keys(players)}`);
+    
+    // Verify target exists
+    if (players[targetId]) {
+      // Initialize armor if it doesn't exist (shouldn't happen with explicit init)
+      if (players[targetId].armor === undefined) {
+        players[targetId].armor = 0;
+        console.log(`WARNING: Player ${targetId} had undefined armor, initializing to 0`);
+      }
+      
+      console.log(`\n=== SERVER DAMAGE CALCULATION ===`);
+      console.log(`Player ${targetId} taking ${damage} damage with ${players[targetId].armor} armor`);
+      console.log(`Before - Health: ${players[targetId].health}, Armor: ${players[targetId].armor}`);
+      
+      // SIMPLIFIED DAMAGE CALCULATION FOR DEBUGGING
+      // Apply direct damage to health for testing
+      const oldHealth = players[targetId].health;
+      players[targetId].health = Math.max(0, players[targetId].health - damage);
+      console.log(`After - Health: ${players[targetId].health}, Armor: ${players[targetId].armor}`);
+      
+      // Send health update to all players
+      const healthUpdateObj = {
+        id: targetId,
+        health: players[targetId].health,
+        armor: players[targetId].armor
+      };
+      
+      console.log(`BROADCASTING HEALTH UPDATE TO ALL PLAYERS: ${JSON.stringify(healthUpdateObj)}`);
+      io.emit('healthUpdate', healthUpdateObj);
+      
+      // Check if player died
+      if (players[targetId].health <= 0) {
+        console.log(`Player ${targetId} died, respawning`);
+        // Reset health and respawn
+        players[targetId].health = 100;
+        players[targetId].armor = 0;
+        
+        // Get new random spawn position
+        const newSpawnPoint = getRandomSpawnPoint();
+        players[targetId].position = newSpawnPoint;
+        
+        // Notify all players of respawn
+        console.log(`Broadcasting respawn event for player ${targetId}`);
+        io.emit('playerRespawned', {
+          id: targetId,
+          position: newSpawnPoint
+        });
+      }
+    } else {
+      console.log(`ERROR: Hit on non-existent player ${targetId}`);
+    }
+  });
 });
