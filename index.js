@@ -177,11 +177,19 @@ io.on('connection', (socket) => {
         players[targetId].position = newSpawnPoint;
         
         // Notify all players of respawn
-        console.log(`Broadcasting respawn event for player ${targetId}`);
         io.emit('playerRespawned', {
           id: targetId,
           position: newSpawnPoint
         });
+        
+        // CRITICAL FIX: Send explicit health update after respawn to update HUD
+        io.emit('healthUpdate', {
+          id: targetId,
+          health: players[targetId].health,
+          armor: players[targetId].armor
+        });
+        
+        console.log(`Player ${targetId} respawned with health=${players[targetId].health}`);
       }
     } else {
       console.log(`ERROR: Hit on non-existent player ${targetId}`);
