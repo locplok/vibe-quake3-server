@@ -96,6 +96,48 @@ io.on('connection', (socket) => {
   console.log(`SENDING INITIAL HEALTH UPDATE: ${JSON.stringify(initialHealthUpdate)}`);
   socket.emit('healthUpdate', initialHealthUpdate);
   
+  // Handle player movement - THIS IS THE MISSING HANDLER!
+  socket.on('playerMovement', (movementData) => {
+    // Validate data first
+    if (!movementData || !movementData.position || 
+        typeof movementData.position.x !== 'number' || 
+        typeof movementData.position.y !== 'number' || 
+        typeof movementData.position.z !== 'number') {
+      console.error(`Invalid movement data received from player ${socket.id}:`, movementData);
+      return;
+    }
+    
+    // Debug counter for position updates per player
+    if (!socket._posUpdateCount) socket._posUpdateCount = 0;
+    socket._posUpdateCount++;
+    
+    // Log movement periodically
+    if (socket._posUpdateCount % 500 === 0) {
+      console.log(`SERVER: Player ${socket.id} has sent ${socket._posUpdateCount} position updates`);
+      console.log(`Current position: (${movementData.position.x.toFixed(2)}, ${movementData.position.y.toFixed(2)}, ${movementData.position.z.toFixed(2)})`);
+      console.log(`Current player count: ${Object.keys(players).length}`);
+    }
+    
+    // Update the player's data
+    if (players[socket.id]) {
+      // Update position and rotation
+      players[socket.id].position = movementData.position;
+      players[socket.id].rotation = movementData.rotation;
+      
+      // Create the data to broadcast
+      const playerData = {
+        id: socket.id,
+        position: players[socket.id].position,
+        rotation: players[socket.id].rotation
+      };
+      
+      // Broadcast the update to all other players
+      socket.broadcast.emit('playerMoved', playerData);
+    } else {
+      console.error(`Received movement data for non-existent player: ${socket.id}`);
+    }
+  });
+  
   // Add disconnect handler at the top level
   socket.on('disconnect', () => {
     console.log('\n==== PLAYER DISCONNECTION ====');
