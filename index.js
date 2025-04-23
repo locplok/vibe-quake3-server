@@ -44,15 +44,14 @@ function getRandomSpawnPoint() {
   return SPAWN_POINTS[randomIndex];
 }
 
-// ... [copy the rest of your server code here] ...
-
-// Determine port
-const PORT = process.env.PORT || 3000;
-
-// Start server
-server.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
-});
+// Function to generate a random name if player doesn't provide one
+function generateRandomName() {
+  const adjectives = ['Swift', 'Brave', 'Mighty', 'Silent', 'Fierce', 'Golden', 'Shadow', 'Iron', 'Mystic'];
+  const nouns = ['Wolf', 'Tiger', 'Eagle', 'Dragon', 'Knight', 'Ninja', 'Warrior', 'Hunter', 'Ranger'];
+  const randomAdjective = adjectives[Math.floor(Math.random() * adjectives.length)];
+  const randomNoun = nouns[Math.floor(Math.random() * nouns.length)];
+  return `${randomAdjective}${randomNoun}${Math.floor(Math.random() * 100)}`;
+}
 
 // Socket.IO connection handling
 io.on('connection', (socket) => {
@@ -65,9 +64,10 @@ io.on('connection', (socket) => {
   const spawnPoint = getRandomSpawnPoint();
   const randomRotation = Math.random() * Math.PI * 2;
   
-  // Create a new player object
+  // Create a new player object with a default temporary name
   players[socket.id] = {
     id: socket.id,
+    name: generateRandomName(), // Default name until the client sends a proper one
     position: spawnPoint,
     rotation: randomRotation,
     health: 100,
@@ -78,23 +78,37 @@ io.on('connection', (socket) => {
   console.log('Player added to server with position:', spawnPoint);
   console.log('New player count:', Object.keys(players).length);
   
-  // Send the current players to the new player
-  console.log('Sending currentPlayers event to new player with', Object.keys(players).length, 'players');
-  socket.emit('currentPlayers', players);
-  
-  // Broadcast the new player to all other players
-  console.log('Broadcasting newPlayer event to other players');
-  socket.broadcast.emit('newPlayer', players[socket.id]);
-  
-  // Initialize client with their own health and armor explicitly
-  const initialHealthUpdate = {
-    id: socket.id,
-    health: players[socket.id].health,
-    // Ensure armor is never undefined by defaulting to 0
-    armor: players[socket.id].armor !== undefined ? players[socket.id].armor : 0
-  };
-  console.log(`SENDING INITIAL HEALTH UPDATE: ${JSON.stringify(initialHealthUpdate)}`);
-  socket.emit('healthUpdate', initialHealthUpdate);
+  // Wait for player name before sending player data
+  socket.on('playerName', (name) => {
+    // Validate name: 3-15 characters, alphanumeric
+    const sanitizedName = name.substring(0, 15).replace(/[^a-zA-Z0-9 ]/g, '');
+    const finalName = sanitizedName || generateRandomName();
+    
+    console.log(`Player ${socket.id} set name to "${finalName}"`);
+    
+    // Update the player's name
+    if (players[socket.id]) {
+      players[socket.id].name = finalName;
+      
+      // Send the current players to the new player (now with name)
+      console.log('Sending currentPlayers event to new player with', Object.keys(players).length, 'players');
+      socket.emit('currentPlayers', players);
+      
+      // Broadcast the new player to all other players
+      console.log('Broadcasting newPlayer event to other players');
+      socket.broadcast.emit('newPlayer', players[socket.id]);
+      
+      // Initialize client with their own health and armor explicitly
+      const initialHealthUpdate = {
+        id: socket.id,
+        health: players[socket.id].health,
+        // Ensure armor is never undefined by defaulting to 0
+        armor: players[socket.id].armor !== undefined ? players[socket.id].armor : 0
+      };
+      console.log(`SENDING INITIAL HEALTH UPDATE: ${JSON.stringify(initialHealthUpdate)}`);
+      socket.emit('healthUpdate', initialHealthUpdate);
+    }
+  });
   
   // Handle player movement - THIS IS THE MISSING HANDLER!
   socket.on('playerMovement', (movementData) => {
@@ -127,6 +141,7 @@ io.on('connection', (socket) => {
       // Create the data to broadcast
       const playerData = {
         id: socket.id,
+        name: players[socket.id].name, // Include name in movement updates
         position: players[socket.id].position,
         rotation: players[socket.id].rotation
       };
@@ -144,6 +159,9 @@ io.on('connection', (socket) => {
     console.log('Player disconnected:', socket.id);
     
     if (players[socket.id]) {
+      // Log player name who disconnected
+      console.log(`Player "${players[socket.id].name}" (${socket.id}) has disconnected`);
+      
       // Delete the player from our players object
       delete players[socket.id];
       console.log('Player removed from server');
@@ -164,8 +182,8 @@ io.on('connection', (socket) => {
     const damage = Math.round(hitData.damage); // Round damage to integer
     
     console.log(`\n=== RECEIVED PLAYER HIT EVENT ===`);
-    console.log(`Shooter: ${socket.id}`);
-    console.log(`Target: ${targetId}`);
+    console.log(`Shooter: ${socket.id} (${players[socket.id]?.name || 'unknown'})`);
+    console.log(`Target: ${targetId} (${players[targetId]?.name || 'unknown'})`);
     console.log(`Damage: ${damage}`);
     console.log(`Target exists: ${!!players[targetId]}`);
     console.log(`All Players: ${Object.keys(players)}`);
@@ -179,7 +197,7 @@ io.on('connection', (socket) => {
       }
       
       console.log(`\n=== SERVER DAMAGE CALCULATION ===`);
-      console.log(`Player ${targetId} taking ${damage} damage with ${players[targetId].armor} armor`);
+      console.log(`Player ${targetId} (${players[targetId].name}) taking ${damage} damage with ${players[targetId].armor} armor`);
       console.log(`Before - Health: ${players[targetId].health}, Armor: ${players[targetId].armor}`);
       
       // SIMPLIFIED DAMAGE CALCULATION FOR DEBUGGING
@@ -201,7 +219,7 @@ io.on('connection', (socket) => {
       // Check if player died
       if (players[targetId].health <= 0) {
         // Increment killer's frag count
-        console.log(`Player ${socket.id} fragged player ${targetId}`);
+        console.log(`Player ${players[socket.id].name} fragged player ${players[targetId].name}`);
         players[socket.id].frags += 1;
         
         // Broadcast updated frag count to all players
@@ -231,10 +249,37 @@ io.on('connection', (socket) => {
           armor: players[targetId].armor
         });
         
-        console.log(`Player ${targetId} respawned with health=${players[targetId].health}`);
+        console.log(`Player ${players[targetId].name} respawned with health=${players[targetId].health}`);
       }
     } else {
       console.log(`ERROR: Hit on non-existent player ${targetId}`);
     }
   });
+});
+
+// Debug middleware to handle armor value setting
+app.post('/debug/set-armor', (req, res) => {
+  const { playerId, armorValue } = req.body;
+  
+  if (players[playerId]) {
+    players[playerId].armor = Math.max(0, parseInt(armorValue) || 0);
+    console.log(`Set player ${playerId} armor to ${players[playerId].armor}`);
+    
+    // Send health/armor update to all players
+    io.emit('healthUpdate', {
+      id: playerId,
+      health: players[playerId].health,
+      armor: players[playerId].armor
+    });
+    
+    res.json({ success: true, message: 'Armor updated' });
+  } else {
+    res.status(404).json({ success: false, message: 'Player not found' });
+  }
+});
+
+// Start the server
+const port = process.env.PORT || 3000;
+server.listen(port, () => {
+  console.log(`Server running on port ${port}`);
 });
