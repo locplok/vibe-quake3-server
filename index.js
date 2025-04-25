@@ -44,6 +44,95 @@ function getRandomSpawnPoint() {
   return SPAWN_POINTS[randomIndex];
 }
 
+// Replace with improved respawn point generation system
+// Constants for map and respawn configuration
+const MAP_SIZE = 180; // Total map size (-90 to +90 on both x and z axes)
+const MIN_RESPAWN_DISTANCE_FROM_KILLER = 50; // Minimum distance from the killer
+const RESPAWN_Y_POSITION = 1; // Standard Y position for respawns
+const RESPAWN_ATTEMPT_LIMIT = 20; // Maximum attempts to find a valid spawn point
+const MOUNTAIN_REGIONS = [
+  // Define mountain regions to avoid [x1, z1, x2, z2, y]
+  // Southeast (Orange mountain)
+  [60, 60, 90, 90, 10],
+  // Northeast (Brown mountain)
+  [-90, 60, -60, 90, 10],
+  // Northwest (Blue-grey mountain)
+  [-90, -90, -60, -60, 10],
+  // Southwest (Light green mountain)
+  [60, -90, 90, -60, 10],
+  // North (Purple mountain)
+  [-20, -90, 20, -70, 10],
+  // South (Indigo mountain)
+  [-20, 70, 20, 90, 10]
+];
+
+// Helper function to calculate distance between two points
+function distanceBetween(pos1, pos2) {
+  const dx = pos1.x - pos2.x;
+  const dz = pos1.z - pos2.z;
+  return Math.sqrt(dx * dx + dz * dz);
+}
+
+// Check if position is inside any mountain region
+function isInsideMountain(position) {
+  for (const region of MOUNTAIN_REGIONS) {
+    const [x1, z1, x2, z2, y] = region;
+    if (position.x >= x1 && position.x <= x2 && 
+        position.z >= z1 && position.z <= z2) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// Check if position is too close to any player
+function isTooCloseToPlayers(position, playersToCheck, minDistance = 5) {
+  for (const playerId in playersToCheck) {
+    const player = playersToCheck[playerId];
+    // Skip players who are waiting to respawn
+    if (player.waitingToRespawn || player.isDead) continue;
+    
+    const distance = distanceBetween(position, player.position);
+    if (distance < minDistance) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// Get a valid random spawn point away from the killer
+function getValidSpawnPoint(killerId = null) {
+  // Start with random positions and validate
+  for (let attempts = 0; attempts < RESPAWN_ATTEMPT_LIMIT; attempts++) {
+    // Generate random coordinates within map bounds
+    const position = {
+      x: (Math.random() * MAP_SIZE) - (MAP_SIZE / 2), // -90 to 90
+      y: RESPAWN_Y_POSITION,
+      z: (Math.random() * MAP_SIZE) - (MAP_SIZE / 2)  // -90 to 90
+    };
+    
+    // Check if this position is valid
+    const isValid = !isInsideMountain(position) && 
+                    !isTooCloseToPlayers(position, players, 10);
+    
+    // If killer ID is provided, ensure minimum distance from killer
+    if (killerId && players[killerId] && !players[killerId].waitingToRespawn) {
+      const distanceFromKiller = distanceBetween(position, players[killerId].position);
+      if (distanceFromKiller < MIN_RESPAWN_DISTANCE_FROM_KILLER) {
+        continue; // Too close to killer, try another position
+      }
+    }
+    
+    if (isValid) {
+      return position;
+    }
+  }
+  
+  // Fallback position if we couldn't find a valid one after max attempts
+  console.log("Warning: Couldn't find valid spawn point, using fallback position");
+  return { x: 0, y: RESPAWN_Y_POSITION, z: 0 };
+}
+
 // Function to generate a random name if player doesn't provide one
 function generateRandomName() {
   const adjectives = ['Swift', 'Brave', 'Mighty', 'Silent', 'Fierce', 'Golden', 'Shadow', 'Iron', 'Mystic'];
@@ -61,7 +150,7 @@ io.on('connection', (socket) => {
   console.log('Current players:', Object.keys(players));
   
   // Generate random spawn position
-  const spawnPoint = getRandomSpawnPoint();
+  const spawnPoint = getValidSpawnPoint();
   const randomRotation = Math.random() * Math.PI * 2;
   
   // Create a new player object with a default temporary name
@@ -75,7 +164,8 @@ io.on('connection', (socket) => {
     frags: 0,  // Initialize frag count
     lastSpawnTime: Date.now(), // Track when the player spawned
     longestSurvivalTime: 0, // Track the player's longest survival time
-    waitingToRespawn: false // Flag to track if player is waiting to respawn
+    waitingToRespawn: false, // Flag to track if player is waiting to respawn
+    isDead: false // Flag to track if player is dead (for visibility)
   };
   
   console.log('Player added to server with position:', spawnPoint);
@@ -191,8 +281,8 @@ io.on('connection', (socket) => {
     console.log(`Target exists: ${!!players[targetId]}`);
     console.log(`All Players: ${Object.keys(players)}`);
     
-    // Verify target exists
-    if (players[targetId]) {
+    // Verify target exists and is not dead or waiting to respawn
+    if (players[targetId] && !players[targetId].waitingToRespawn && !players[targetId].isDead) {
       // Initialize armor if it doesn't exist (shouldn't happen with explicit init)
       if (players[targetId].armor === undefined) {
         players[targetId].armor = 0;
@@ -257,8 +347,9 @@ io.on('connection', (socket) => {
           frags: players[socket.id].frags
         });
         
-        // Mark the player as waiting to respawn (instead of automatically respawning)
+        // Mark the player as waiting to respawn AND as dead (visible state)
         players[targetId].waitingToRespawn = true;
+        players[targetId].isDead = true;
         players[targetId].health = 0; // Ensure health is zero
         
         // Notify all players that this player is dead and waiting to respawn
@@ -271,7 +362,12 @@ io.on('connection', (socket) => {
         console.log(`Player ${players[targetId].name} is now waiting to respawn`);
       }
     } else {
-      console.log(`ERROR: Hit on non-existent player ${targetId}`);
+      // Player was already dead or doesn't exist
+      if (players[targetId] && (players[targetId].waitingToRespawn || players[targetId].isDead)) {
+        console.log(`Ignoring hit on dead player ${targetId}`);
+      } else {
+        console.log(`ERROR: Hit on non-existent player ${targetId}`);
+      }
     }
   });
 
@@ -281,18 +377,22 @@ io.on('connection', (socket) => {
     if (players[socket.id] && players[socket.id].waitingToRespawn) {
       console.log(`Player ${players[socket.id].name} requested to respawn`);
       
+      // Get a valid spawn point away from the killer
+      // Note: We store the killerId in a property on the player object
+      const newSpawnPoint = getValidSpawnPoint(players[socket.id].lastKillerId);
+      
       // Reset health and armor
       players[socket.id].health = 100;
       players[socket.id].armor = 0;
       
-      // Reset waiting flag
+      // Reset waiting and dead flags
       players[socket.id].waitingToRespawn = false;
+      players[socket.id].isDead = false;
       
       // Update spawn time for new survival time tracking
       players[socket.id].lastSpawnTime = Date.now();
       
-      // Get new random spawn position
-      const newSpawnPoint = getRandomSpawnPoint();
+      // Update position to the new spawn point
       players[socket.id].position = newSpawnPoint;
       
       // Notify all players of respawn
