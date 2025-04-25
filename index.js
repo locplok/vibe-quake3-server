@@ -72,7 +72,10 @@ io.on('connection', (socket) => {
     rotation: randomRotation,
     health: 100,
     armor: 0, // Initialize armor explicitly to 0
-    frags: 0  // Initialize frag count
+    frags: 0,  // Initialize frag count
+    lastSpawnTime: Date.now(), // Track when the player spawned
+    longestSurvivalTime: 0, // Track the player's longest survival time
+    waitingToRespawn: false // Flag to track if player is waiting to respawn
   };
   
   console.log('Player added to server with position:', spawnPoint);
@@ -218,6 +221,32 @@ io.on('connection', (socket) => {
       
       // Check if player died
       if (players[targetId].health <= 0) {
+        // Calculate survival time since last spawn
+        const survivalTime = Date.now() - players[targetId].lastSpawnTime;
+        
+        // Update longest survival time if this was longer
+        if (survivalTime > players[targetId].longestSurvivalTime) {
+          const oldBest = players[targetId].longestSurvivalTime;
+          players[targetId].longestSurvivalTime = survivalTime;
+          console.log(`Player ${players[targetId].name} set a new personal best survival time: ${survivalTime}ms (previous: ${oldBest}ms)`);
+          
+          // Broadcast updated survival time to all players
+          io.emit('survivalTimeUpdate', {
+            id: targetId,
+            survivalTime: survivalTime,
+            longestSurvivalTime: players[targetId].longestSurvivalTime,
+            isNewRecord: true
+          });
+        } else {
+          // Just broadcast the current survival time
+          io.emit('survivalTimeUpdate', {
+            id: targetId,
+            survivalTime: survivalTime,
+            longestSurvivalTime: players[targetId].longestSurvivalTime,
+            isNewRecord: false
+          });
+        }
+        
         // Increment killer's frag count
         console.log(`Player ${players[socket.id].name} fragged player ${players[targetId].name}`);
         players[socket.id].frags += 1;
@@ -228,31 +257,60 @@ io.on('connection', (socket) => {
           frags: players[socket.id].frags
         });
         
-        // Reset health and respawn
-        players[targetId].health = 100;
-        players[targetId].armor = 0; // Reset armor on death
+        // Mark the player as waiting to respawn (instead of automatically respawning)
+        players[targetId].waitingToRespawn = true;
+        players[targetId].health = 0; // Ensure health is zero
         
-        // Get new random spawn position
-        const newSpawnPoint = getRandomSpawnPoint();
-        players[targetId].position = newSpawnPoint;
-        
-        // Notify all players of respawn
-        io.emit('playerRespawned', {
+        // Notify all players that this player is dead and waiting to respawn
+        io.emit('playerDied', {
           id: targetId,
-          position: newSpawnPoint
+          killerId: socket.id,
+          survivalTime: survivalTime
         });
         
-        // CRITICAL FIX: Send explicit health update after respawn to update HUD
-        io.emit('healthUpdate', {
-          id: targetId,
-          health: players[targetId].health,
-          armor: players[targetId].armor
-        });
-        
-        console.log(`Player ${players[targetId].name} respawned with health=${players[targetId].health}`);
+        console.log(`Player ${players[targetId].name} is now waiting to respawn`);
       }
     } else {
       console.log(`ERROR: Hit on non-existent player ${targetId}`);
+    }
+  });
+
+  // Add respawn request handler
+  socket.on('playerRequestRespawn', () => {
+    // Check if the player is actually waiting to respawn
+    if (players[socket.id] && players[socket.id].waitingToRespawn) {
+      console.log(`Player ${players[socket.id].name} requested to respawn`);
+      
+      // Reset health and armor
+      players[socket.id].health = 100;
+      players[socket.id].armor = 0;
+      
+      // Reset waiting flag
+      players[socket.id].waitingToRespawn = false;
+      
+      // Update spawn time for new survival time tracking
+      players[socket.id].lastSpawnTime = Date.now();
+      
+      // Get new random spawn position
+      const newSpawnPoint = getRandomSpawnPoint();
+      players[socket.id].position = newSpawnPoint;
+      
+      // Notify all players of respawn
+      io.emit('playerRespawned', {
+        id: socket.id,
+        position: newSpawnPoint
+      });
+      
+      // Send explicit health update after respawn to update HUD
+      io.emit('healthUpdate', {
+        id: socket.id,
+        health: players[socket.id].health,
+        armor: players[socket.id].armor
+      });
+      
+      console.log(`Player ${players[socket.id].name} respawned at position:`, newSpawnPoint);
+    } else {
+      console.log(`Player ${socket.id} requested to respawn but isn't waiting to respawn`);
     }
   });
 });
