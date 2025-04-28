@@ -206,11 +206,14 @@ io.on('connection', (socket) => {
   // Handle player movement - THIS IS THE MISSING HANDLER!
   socket.on('playerMovement', (movementData) => {
     // Validate data first
-    if (!movementData || !movementData.position || 
-        typeof movementData.position.x !== 'number' || 
-        typeof movementData.position.y !== 'number' || 
-        typeof movementData.position.z !== 'number') {
-      console.error(`Invalid movement data received from player ${socket.id}:`, movementData);
+    if (!movementData || !movementData.position || !movementData.rotation) {
+      console.error('Invalid movement data received:', movementData);
+      return;
+    }
+    
+    // Check if player is dead or waiting to respawn
+    if (players[socket.id] && (players[socket.id].isDead || players[socket.id].waitingToRespawn)) {
+      console.log(`Ignoring movement from dead player ${socket.id}`);
       return;
     }
     
@@ -412,6 +415,21 @@ io.on('connection', (socket) => {
     } else {
       console.log(`Player ${socket.id} requested to respawn but isn't waiting to respawn`);
     }
+  });
+
+  socket.on('playerShot', (shotData) => {
+    // Check if player is dead or waiting to respawn
+    if (players[socket.id] && (players[socket.id].isDead || players[socket.id].waitingToRespawn)) {
+      console.log(`Ignoring shot from dead player ${socket.id}`);
+      return;
+    }
+    
+    // Broadcast the shot to all players
+    io.emit('shotFired', {
+      id: socket.id,
+      origin: shotData.origin,
+      direction: shotData.direction
+    });
   });
 });
 
