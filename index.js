@@ -479,6 +479,55 @@ io.on('connection', (socket) => {
       });
     }
   });
+
+  // Handle armor pickups
+  socket.on('armorPickup', (pickupData, acknowledge) => {
+    if (!players[socket.id]) {
+      console.log(`Invalid armor pickup from non-existent player ${socket.id}`);
+      if (typeof acknowledge === 'function') {
+        acknowledge({ success: false, message: 'Player not found' });
+      }
+      return;
+    }
+
+    const oldArmor = players[socket.id].armor || 0;
+    const armorAmount = Math.round(pickupData.amount);
+
+    // Validate armor amount
+    if (isNaN(armorAmount) || armorAmount <= 0) {
+      console.log(`Invalid armor amount: ${armorAmount}`);
+      if (typeof acknowledge === 'function') {
+        acknowledge({ success: false, message: 'Invalid armor amount' });
+      }
+      return;
+    }
+
+    // Apply armor, capped at 100
+    players[socket.id].armor = Math.min(100, oldArmor + armorAmount);
+    console.log(`Player ${socket.id} picked up armor: ${oldArmor} → ${players[socket.id].armor}`);
+
+    // Broadcast the health/armor update to all players
+    const updateObj = {
+      id: socket.id,
+      health: players[socket.id].health,
+      armor: players[socket.id].armor,
+      type: 'armorPickup',
+      amount: armorAmount
+    };
+
+    console.log(`Broadcasting armor pickup: ${JSON.stringify(updateObj)}`);
+    io.emit('healthUpdate', updateObj);
+
+    // Send acknowledgment if callback exists
+    if (typeof acknowledge === 'function') {
+      acknowledge({
+        success: true,
+        message: 'Armor pickup processed',
+        newArmor: players[socket.id].armor,
+        armorAmount: armorAmount
+      });
+    }
+  });
 });
 
 // Debug middleware to handle armor value setting
