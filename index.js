@@ -272,16 +272,15 @@ io.on('connection', (socket) => {
   });
 
   // Handle player hits
-  socket.on('playerHit', (hitData) => {
+  socket.on('playerHit', (hitData, acknowledge) => {
     const targetId = hitData.id;
     const damage = Math.round(hitData.damage); // Round damage to integer
     
     console.log(`\n=== RECEIVED PLAYER HIT EVENT ===`);
-    console.log(`Shooter: ${socket.id} (${players[socket.id]?.name || 'unknown'})`);
-    console.log(`Target: ${targetId} (${players[targetId]?.name || 'unknown'})`);
+    console.log(`Shooter: ${socket.id}`);
+    console.log(`Target: ${targetId}`);
     console.log(`Damage: ${damage}`);
     console.log(`Target exists: ${!!players[targetId]}`);
-    console.log(`All Players: ${Object.keys(players)}`);
     
     // Verify target exists and is not dead or waiting to respawn
     if (players[targetId] && !players[targetId].waitingToRespawn && !players[targetId].isDead) {
@@ -292,14 +291,37 @@ io.on('connection', (socket) => {
       }
       
       console.log(`\n=== SERVER DAMAGE CALCULATION ===`);
-      console.log(`Player ${targetId} (${players[targetId].name}) taking ${damage} damage with ${players[targetId].armor} armor`);
+      console.log(`Player ${targetId} taking ${damage} damage with ${players[targetId].armor} armor`);
       console.log(`Before - Health: ${players[targetId].health}, Armor: ${players[targetId].armor}`);
       
-      // SIMPLIFIED DAMAGE CALCULATION FOR DEBUGGING
-      // Apply direct damage to health for testing
+      // Calculate damage distribution between armor and health
+      let healthDamage = damage;
+      let armorDamage = 0;
+      
+      // If player has armor, calculate damage reduction
+      if (players[targetId].armor > 0) {
+        const armorProtection = 0.8; // 80% damage reduction
+        
+        // Calculate how much damage armor can absorb (80% of total damage)
+        const maxArmorDamage = damage * armorProtection;
+        armorDamage = Math.min(players[targetId].armor, maxArmorDamage);
+        
+        // Update armor value
+        const oldArmor = players[targetId].armor;
+        players[targetId].armor = Math.round(Math.max(0, oldArmor - armorDamage));
+        console.log(`- Armor reduced from ${oldArmor} to ${players[targetId].armor}`);
+        
+        // Remaining damage goes to health
+        healthDamage = Math.round(damage - armorDamage);
+        console.log(`- Armor absorbed ${armorDamage} damage, ${healthDamage} damage to health`);
+      } else {
+        console.log(`- No armor, full damage (${damage}) goes to health`);
+      }
+      
+      // Apply remaining damage to health
       const oldHealth = players[targetId].health;
-      players[targetId].health = Math.max(0, players[targetId].health - damage);
-      console.log(`After - Health: ${players[targetId].health}, Armor: ${players[targetId].armor}`);
+      players[targetId].health = Math.round(Math.max(0, oldHealth - healthDamage));
+      console.log(`- Health reduced from ${oldHealth} to ${players[targetId].health}`);
       
       // Send health update to all players
       const healthUpdateObj = {
