@@ -577,6 +577,10 @@ io.on('connection', (socket) => {
 
   // Handle armor pickups
   socket.on('armorPickup', (pickupData, acknowledge) => {
+    console.log('\n==== ARMOR PICKUP EVENT ====');
+    console.log('Player:', socket.id);
+    console.log('Pickup data:', pickupData);
+
     if (!players[socket.id]) {
       console.log(`Invalid armor pickup from non-existent player ${socket.id}`);
       if (typeof acknowledge === 'function') {
@@ -599,7 +603,10 @@ io.on('connection', (socket) => {
 
     // Apply armor, capped at 100
     players[socket.id].armor = Math.min(100, oldArmor + armorAmount);
-    console.log(`Player ${socket.id} picked up armor: ${oldArmor} → ${players[socket.id].armor}`);
+    console.log(`\nArmor Update Details:`);
+    console.log(`- Previous armor: ${oldArmor}`);
+    console.log(`- Armor pickup amount: ${armorAmount}`);
+    console.log(`- New armor value: ${players[socket.id].armor}`);
 
     // Broadcast the health/armor update to all players
     const updateObj = {
@@ -610,18 +617,23 @@ io.on('connection', (socket) => {
       amount: armorAmount
     };
 
-    console.log(`Broadcasting armor pickup: ${JSON.stringify(updateObj)}`);
+    console.log(`\nBroadcasting armor update to all players:`);
+    console.log(JSON.stringify(updateObj, null, 2));
     io.emit('healthUpdate', updateObj);
 
     // Send acknowledgment if callback exists
     if (typeof acknowledge === 'function') {
-      acknowledge({
+      const response = {
         success: true,
         message: 'Armor pickup processed',
         newArmor: players[socket.id].armor,
         armorAmount: armorAmount
-      });
+      };
+      console.log('\nSending acknowledgment to client:', response);
+      acknowledge(response);
     }
+    
+    console.log('==== ARMOR PICKUP EVENT COMPLETE ====\n');
   });
 });
 
