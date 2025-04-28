@@ -18,6 +18,68 @@ const io = new Server(server, {
   }
 });
 
+// Add middleware to intercept and fix health updates
+io.use((socket, next) => {
+  // Intercept outgoing packets for individual socket
+  const originalEmit = socket.emit;
+  socket.emit = function(event, ...args) {
+    // Check if this is a health update event
+    if (event === 'healthUpdate') {
+      const data = args[0];
+      console.log(`INTERCEPTED socket.emit healthUpdate: ${JSON.stringify(data)}`);
+      
+      // Ensure armor property exists
+      if (data && data.armor === undefined) {
+        console.log(`FIXING missing armor property for player ${data.id} in socket.emit`);
+        // Find the player's armor value or default to 0
+        const playerArmor = players[data.id] ? (players[data.id].armor || 0) : 0;
+        
+        // Important: Create a completely new object to avoid reference issues
+        const fixedData = {
+          id: data.id,
+          health: data.health,
+          armor: playerArmor
+        };
+        console.log(`FIXED object for socket.emit: ${JSON.stringify(fixedData)}`);
+        
+        // Replace the original object in args
+        args[0] = fixedData;
+      }
+    }
+    return originalEmit.apply(this, [event, ...args]);
+  };
+  next();
+});
+
+// Also intercept io.emit (broadcasts to all)
+const originalIoEmit = io.emit;
+io.emit = function(event, ...args) {
+  // Check if this is a health update event
+  if (event === 'healthUpdate') {
+    const data = args[0];
+    console.log(`INTERCEPTED io.emit healthUpdate: ${JSON.stringify(data)}`);
+    
+    // Ensure armor property exists
+    if (data && data.armor === undefined) {
+      console.log(`FIXING missing armor property for player ${data.id} in io.emit`);
+      // Find the player's armor value or default to 0
+      const playerArmor = players[data.id] ? (players[data.id].armor || 0) : 0;
+      
+      // Important: Create a completely new object to avoid reference issues
+      const fixedData = {
+        id: data.id,
+        health: data.health,
+        armor: playerArmor
+      };
+      console.log(`FIXED object for io.emit: ${JSON.stringify(fixedData)}`);
+      
+      // Replace the original object in args
+      args[0] = fixedData;
+    }
+  }
+  return originalIoEmit.apply(this, [event, ...args]);
+};
+
 // Middleware
 app.use(cors());
 app.use(express.json());
@@ -295,27 +357,38 @@ io.on('connection', (socket) => {
       console.log(`Before - Health: ${players[targetId].health}, Armor: ${players[targetId].armor}`);
       
       // Calculate damage distribution between armor and health
-      let healthDamage = damage;
+      let healthDamage = 0;
       let armorDamage = 0;
       
       // If player has armor, calculate damage reduction
       if (players[targetId].armor > 0) {
         const armorProtection = 0.8; // 80% damage reduction
         
-        // Calculate how much damage armor can absorb (80% of total damage)
-        const maxArmorDamage = damage * armorProtection;
+        // Calculate armor damage (80% of incoming damage)
+        const maxArmorDamage = Math.round(damage * armorProtection);
+        
+        // Limit armor damage by available armor
         armorDamage = Math.min(players[targetId].armor, maxArmorDamage);
         
         // Update armor value
         const oldArmor = players[targetId].armor;
-        players[targetId].armor = Math.round(Math.max(0, oldArmor - armorDamage));
+        players[targetId].armor = Math.max(0, oldArmor - armorDamage);
         console.log(`- Armor reduced from ${oldArmor} to ${players[targetId].armor}`);
         
-        // Remaining damage goes to health
-        healthDamage = Math.round(damage - armorDamage);
-        console.log(`- Armor absorbed ${armorDamage} damage, ${healthDamage} damage to health`);
+        // Only 20% of damage goes to health when armor is available
+        healthDamage = Math.round(damage * (1 - armorProtection));
+        
+        // If armor was depleted, add remaining damage to health
+        if (armorDamage < maxArmorDamage) {
+          const remainingDamage = maxArmorDamage - armorDamage;
+          healthDamage += remainingDamage;
+        }
+        
+        console.log(`- Armor absorbed ${armorDamage} damage`);
+        console.log(`- ${healthDamage} damage applied to health`);
       } else {
         console.log(`- No armor, full damage (${damage}) goes to health`);
+        healthDamage = damage;
       }
       
       // Apply remaining damage to health
