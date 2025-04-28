@@ -213,7 +213,6 @@ io.on('connection', (socket) => {
     
     // Check if player is dead or waiting to respawn
     if (players[socket.id] && (players[socket.id].isDead || players[socket.id].waitingToRespawn)) {
-      console.log(`Ignoring movement from dead player ${socket.id}`);
       return;
     }
     
@@ -430,6 +429,55 @@ io.on('connection', (socket) => {
       origin: shotData.origin,
       direction: shotData.direction
     });
+  });
+
+  // Handle health pickups
+  socket.on('healthPickup', (pickupData, acknowledge) => {
+    if (!players[socket.id]) {
+      console.log(`Invalid health pickup from non-existent player ${socket.id}`);
+      if (typeof acknowledge === 'function') {
+        acknowledge({ success: false, message: 'Player not found' });
+      }
+      return;
+    }
+
+    const oldHealth = players[socket.id].health;
+    const healAmount = Math.round(pickupData.amount);
+
+    // Validate heal amount
+    if (isNaN(healAmount) || healAmount <= 0) {
+      console.log(`Invalid heal amount: ${healAmount}`);
+      if (typeof acknowledge === 'function') {
+        acknowledge({ success: false, message: 'Invalid heal amount' });
+      }
+      return;
+    }
+
+    // Apply healing, capped at 100
+    players[socket.id].health = Math.min(100, oldHealth + healAmount);
+    console.log(`Player ${socket.id} picked up health: ${oldHealth} → ${players[socket.id].health}`);
+
+    // Broadcast the health update to all players
+    const healthUpdateObj = {
+      id: socket.id,
+      health: players[socket.id].health,
+      armor: players[socket.id].armor !== undefined ? players[socket.id].armor : 0,
+      type: 'pickup',
+      amount: healAmount
+    };
+
+    console.log(`Broadcasting health pickup: ${JSON.stringify(healthUpdateObj)}`);
+    io.emit('healthUpdate', healthUpdateObj);
+
+    // Send acknowledgment if callback exists
+    if (typeof acknowledge === 'function') {
+      acknowledge({
+        success: true,
+        message: 'Health pickup processed',
+        newHealth: players[socket.id].health,
+        healAmount: healAmount
+      });
+    }
   });
 });
 
